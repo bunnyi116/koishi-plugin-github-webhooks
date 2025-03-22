@@ -4,13 +4,12 @@ import { } from '@koishijs/plugin-server'
 // import { } from '@koishijs/plugin-database-sqlite'
 
 // 当前支持的事件类型列表
-const SUPPORTED_EVENTS = ['star', 'push', 'workflow_run', 'issues', 'pull_request', 'release']
+const SUPPORTED_EVENTS = ['star', 'push', 'workflow_run', 'issues', 'pull_request', 'release', 'issue_comment']
 
 export const name = 'github-webhooks'
 export const inject = { required: ['database', 'server'] }
 
 export interface Subscription {
-  id?: number
   repo: string       // GitHub 仓库全名，例如 owner/repo
   target: string     // 订阅目标 id（群、用户或频道）
   type: string       // 订阅类型：group, user, channel
@@ -26,11 +25,12 @@ declare module 'koishi' {
 
 export interface Config {
   path: string
-  // 仓库配置项：只需要配置仓库全名和对应的 secret
   repositories: Array<{
     repo: string
     secret: string
   }>
+  enableImage: boolean
+  enableUnknownEvent: boolean
 }
 
 export const Config: Schema<Config> = Schema.object({
@@ -41,6 +41,8 @@ export const Config: Schema<Config> = Schema.object({
       secret: Schema.string().description('该仓库对应的 Webhook secret'),
     })
   ).description('允许监听的仓库列表，每个仓库必须配置 secret').default([]),
+  enableImage: Schema.boolean().default(false).description('是否在推送时附带 opengraph 图片'),
+  enableUnknownEvent: Schema.boolean().default(false).description('是否推送未知事件消息'),
 })
 
 /**
@@ -54,14 +56,17 @@ function getGithubRegURL(url: string): string {
 
 /**
  * 根据订阅项发送消息。遍历 ctx.bots 中所有 bot，
- * 如果订阅平台与 bot 平台一致，则发送消息到对应目标。
+ * 如果订阅平台与 bot 平台一致，则发送消息到对应目标，
+ * 同时启用 Koishi 内置过滤器（filter）。
  */
 function sendEventMessage(ctx: Context, subs: Subscription[], msgElement: Element[]) {
+  // 如果消息链为空，则不发送
+  if (!msgElement.length) return
   ctx.bots.forEach(bot => {
     subs.forEach(sub => {
       try {
         if (sub.platform.toLowerCase() === bot.platform.toLowerCase()) {
-          ctx.bots[`${bot.platform}:${bot.selfId}`].sendMessage(`${sub.target}`, msgElement)
+          ctx.bots[`${bot.platform}:${bot.selfId}`].sendMessage(`${sub.target}`, msgElement, { filter: true })
         }
       } catch (e) {
         ctx.logger('github-webhook').error(e)
@@ -72,8 +77,11 @@ function sendEventMessage(ctx: Context, subs: Subscription[], msgElement: Elemen
 
 /**
  * 根据不同 Github 事件构造消息链，并加入 emoji 美化
+ * @param event 事件类型
+ * @param payload webhook 负载
+ * @param config 插件配置（用于判断是否附带图片、未知事件推送）
  */
-function buildMsgChain(event: string, payload: any): Element[] {
+function buildMsgChain(event: string, payload: any, config: Config): Element[] {
   let msgChain: Element[] = []
   const repo = payload.repository
   const repoName = repo?.full_name || '未知仓库'
@@ -82,15 +90,16 @@ function buildMsgChain(event: string, payload: any): Element[] {
     case 'star': {
       const action = payload.action
       const starCount = repo?.stargazers_count ?? 0
-      const regUrl = getGithubRegURL(repo['html_url'])
-      const hash = crypto.createHash('sha256').update(new Date().toString()).digest('hex').slice(0, 8)
-      const imgURL = { src: 'https://opengraph.githubassets.com/' + hash + regUrl }
-      if (action === 'created') {
-        const content = `⭐ 用户 ${sender.login} star 了仓库 ${repoName}（现有 ${starCount} 个 star）`
-        msgChain = [h('message', content, h('img', imgURL))]
-      } else if (action === 'deleted') {
-        const content = `⭐ 用户 ${sender.login} unstar 了仓库 ${repoName}（剩余 ${starCount} 个 star）`
-        msgChain = [h('message', content, h('img', imgURL))]
+      const contentBase = action === 'created'
+        ? `⭐ 用户 ${sender.login} star 了仓库 ${repoName}（现有 ${starCount} 个 star）`
+        : `⭐ 用户 ${sender.login} unstar 了仓库 ${repoName}（剩余 ${starCount} 个 star）`
+      if (config.enableImage) {
+        const regUrl = getGithubRegURL(repo['html_url'])
+        const hash = crypto.createHash('sha256').update(new Date().toString()).digest('hex').slice(0, 8)
+        const imgURL = { src: 'https://opengraph.githubassets.com/' + hash + regUrl }
+        msgChain = [h('message', contentBase, h('img', imgURL))]
+      } else {
+        msgChain = [h('message', contentBase)]
       }
       break
     }
@@ -98,15 +107,22 @@ function buildMsgChain(event: string, payload: any): Element[] {
       const pusher = payload.pusher || {}
       const commits = payload.commits || []
       let content = `🚀 用户 ${pusher.name} push 到仓库 ${repoName}，提交信息如下：\n`
-      const imgElements: Element[] = []
       commits.forEach((commit: any) => {
         content += `- ${commit.message}\n`
-        const imgHash = crypto.createHash('sha256').update(commit.id).digest('hex').slice(0, 8)
-        const urlRes = 'https://opengraph.githubassets.com/' + imgHash + getGithubRegURL(commit.url)
-        imgElements.push(h('img', { src: urlRes }))
       })
       content += `详情：${payload.compare}`
-      msgChain = [h('message', content, imgElements)]
+      // 如果允许图片，则构造 commit 对应的图片（可选）
+      if (config.enableImage) {
+        const imgElements: Element[] = []
+        commits.forEach((commit: any) => {
+          const imgHash = crypto.createHash('sha256').update(commit.id).digest('hex').slice(0, 8)
+          const urlRes = 'https://opengraph.githubassets.com/' + imgHash + getGithubRegURL(commit.url)
+          imgElements.push(h('img', { src: urlRes }))
+        })
+        msgChain = [h('message', content, imgElements)]
+      } else {
+        msgChain = [h('message', content)]
+      }
       break
     }
     case 'workflow_run': {
@@ -148,8 +164,22 @@ function buildMsgChain(event: string, payload: any): Element[] {
       }
       break
     }
+    case 'issue_comment': {
+      const issue = payload.issue || {}
+      const comment = payload.comment || {}
+      if (payload.action === 'created') {
+        let content = `💬 仓库 ${repoName} Issue [#${issue.number}] 收到新评论：\n${comment.body}\n作者：${comment.user.login}\n详情：${comment.html_url}`
+        msgChain = [h('message', content)]
+      }
+      break
+    }
     default: {
-      msgChain = [h('message', `收到 Github 事件: ${event}`)]
+      // 对于未知事件，根据配置决定是否推送（并添加仓库名称）
+      if (config.enableUnknownEvent) {
+        msgChain = [h('message', `仓库 ${repoName} 收到未知事件: ${event}`)]
+      } else {
+        msgChain = []
+      }
       break
     }
   }
@@ -158,92 +188,184 @@ function buildMsgChain(event: string, payload: any): Element[] {
 
 export function apply(ctx: Context, config: Config) {
   ctx.model.extend('github_subscription', {
-    id: 'unsigned',
-    repo: 'string',
-    target: 'string',
-    type: 'string',
-    platform: 'string',
+    repo: { type: 'string', length: 150 },
+    target: { type: 'string', length: 150 },
+    type: { type: 'string', length: 60 },
+    platform: { type: 'string', length: 60 },
     events: 'string',
   }, {
-    primary: 'id',
-    autoInc: true,
+    primary: ['platform', 'type', 'target', 'repo'],
   })
 
-  // 用户订阅命令
-  // 用户订阅命令（将 repo 参数设为可选）
+  // 用户订阅命令：wh-sub
   ctx.command('wh-sub [repo:string] [eventTypes:string]', '订阅指定 Github 仓库事件推送')
     .alias('订阅github')
     .option('desc', '默认订阅所有事件，如需指定事件请用逗号分隔，例如 push,star')
     .action(async ({ session }, repo?: string, eventTypes?: string) => {
-      // 如果没有传入仓库参数，则告知当前可订阅仓库列表
+      // 若未传入仓库参数，则返回配置中的仓库列表（带序号）
       if (!repo) {
         if (config.repositories.length === 0) {
-          session.send('订阅失败,您没有输入仓库名称,当前没有设置可供订阅的仓库。')
-          return;
+          session.send('当前未设置可供订阅的仓库。')
+          return
         }
-        const repoList = config.repositories.map(item => item.repo).join('\n')
-        session.send(`订阅失败,您没有输入仓库名称,当前可订阅仓库列表：\n${repoList}`)
+        const repoList = config.repositories
+          .map((item, index) => `${index}: ${item.repo}`)
+          .join('\n')
+        session.send(`请选择订阅的仓库：\n${repoList}`)
         return;
       }
-      // 如果传入了仓库参数，则继续订阅逻辑
+
+      let repoName = ''
+      if (/^\d+$/.test(repo)) {
+        // 若输入为数字，则作为序号查找
+        const idx = Number(repo)
+        if (idx < 0 || idx >= config.repositories.length) {
+          session.send('仓库序号无效，请输入有效的序号。')
+          return;
+        }
+        repoName = config.repositories[idx].repo
+      } else {
+        repoName = repo
+      }
+      // 检查仓库是否在配置项中
+      const repoConfig = config.repositories.find(item => item.repo === repoName)
+      if (!repoConfig) {
+        session.send(`仓库 ${repoName} 未在预设列表中，请选择正确的仓库。`)
+        return;
+      }
+
+      // 确定订阅目标、平台和类型
       const target = session.guildId || session.userId || session.channelId
       if (!target) {
         session.send('无法识别订阅目标，请在群聊、私聊或频道中使用此命令。')
         return;
       }
       const platform = session.platform
-      const exists = await ctx.database.get('github_subscription', { repo, target, platform })
-      if (exists.length) {
-        session.send('该仓库已订阅过了。')
-        return;
-      }
+      const type = session.guildId ? 'group' : (session.userId ? 'user' : 'channel')
       const events = eventTypes ? eventTypes.trim() : 'all'
-      await ctx.database.create('github_subscription', {
-        repo,
-        target,
-        platform,
-        type: session.guildId ? 'group' : (session.userId ? 'user' : 'channel'),
-        events,
-      })
-      await session.send(`订阅成功：${repo}，订阅事件：${events}`)
+
+      // 检查订阅是否已存在（组合主键唯一）
+      const exists = await ctx.database.get('github_subscription', { repo: repoName, target, platform })
+      if (exists.length) {
+        // 存在则更新（覆盖设置，例如 events 字段）
+        await ctx.database.set('github_subscription', { repo: repoName, target, platform }, { events })
+        session.send(`已更新订阅：${repoName}，订阅事件：${events}`)
+      } else {
+        await ctx.database.create('github_subscription', { repo: repoName, target, platform, type, events })
+        session.send(`订阅成功：${repoName}，订阅事件：${events}`)
+      }
     })
 
-  // 取消订阅命令
-  ctx.command('wh-unsub <repo>', '取消指定 Github 仓库事件推送订阅')
+
+  // 合并取消订阅命令（普通用户取消自己订阅，管理员可传入 target 参数删除指定订阅）
+  // 合并取消订阅命令（普通用户取消自己订阅，管理员可传入 target 参数删除指定订阅）
+  ctx.command('wh-unsub [repo:string] [target]', '取消指定 Github 仓库事件推送订阅')
     .alias('取消订阅github')
-    .action(async ({ session }, repo: string) => {
-      const target = session.guildId || session.userId || session.channelId
+    .option('admin', '3')
+    .action(async ({ session, options }, repo?: string, targetArg?: string) => {
+      // 确定目标
+      let target: string;
+      if (targetArg) {
+        if (!options.admin) {
+          session.send('只有管理员才允许删除其他订阅记录。');
+          return;
+        }
+        target = targetArg;
+      } else {
+        target = session.guildId || session.userId || session.channelId;
+      }
       if (!target) {
-        session.send('无法识别订阅目标。')
+        session.send('无法识别订阅目标。');
         return;
       }
-      const platform = session.platform
-      const subscription = await ctx.database.get('github_subscription', { repo, target, platform })
-      if (!subscription.length) {
-        session.send('未找到对应的订阅。')
-        return;
-      }
-      await ctx.database.remove('github_subscription', { repo, target, platform })
-      session.send(`取消订阅成功：${repo}`)
-    })
+      const platform = session.platform;
 
-  // 查看当前订阅命令
-  ctx.command('wh-list', '列出本会话已订阅的 Github 仓库及订阅的事件类型')
+      // 如果未传入 repo 参数，则返回当前用户的订阅列表（带序号）
+      if (!repo) {
+        const subscriptions = await ctx.database.get('github_subscription', { target, platform });
+        if (!subscriptions.length) {
+          session.send('当前没有订阅记录。');
+          return;
+        }
+        const listText = subscriptions
+          .map((item, index) => `${index}: ${item.repo} (事件: ${item.events})`)
+          .join('\n');
+        session.send(`您当前已订阅的仓库列表：\n${listText}\n请使用 #wh-unsub <序号> 来取消订阅。`);
+        return;
+      }
+
+      // 判断传入的 repo 是否为数字（订阅序号取消）
+      if (/^\d+$/.test(repo)) {
+        const subscriptions = await ctx.database.get('github_subscription', { target, platform });
+        if (!subscriptions.length) {
+          session.send('当前没有订阅记录。');
+          return;
+        }
+        const index = Number(repo);
+        if (index < 0 || index >= subscriptions.length) {
+          session.send('订阅序号无效，请输入有效的序号。');
+          return;
+        }
+        const subscription = subscriptions[index];
+        await ctx.database.remove('github_subscription', { repo: subscription.repo, target, platform });
+        session.send(`取消订阅成功：${subscription.repo}，目标：${target}`);
+        return;
+      } else {
+        // 否则按仓库名称取消订阅
+        const subscriptions = await ctx.database.get('github_subscription', { repo, target, platform });
+        if (!subscriptions.length) {
+          // 当未找到对应订阅时，返回当前用户所有订阅记录
+          const userSubs = await ctx.database.get('github_subscription', { target, platform });
+          if (userSubs.length) {
+            const listText = userSubs
+              .map((item, index) => `${index}: ${item.repo} (事件: ${item.events})`)
+              .join('\n');
+            session.send(`未找到订阅 ${repo}。\n您当前已订阅的仓库列表：\n${listText}`);
+            return;
+          } else {
+            session.send(`未找到订阅 ${repo}，且当前没有任何订阅记录。`);
+            return;
+          }
+          return;
+        }
+        await ctx.database.remove('github_subscription', { repo, target, platform });
+        session.send(`取消订阅成功：${repo}，目标：${target}`);
+        return;
+      }
+    });
+
+
+  // 合并查看订阅命令：wh-list
+  // 当使用 --admin 选项时显示所有订阅记录，否则只显示当前会话的订阅
+  ctx.command('wh-list', '查看订阅列表')
     .alias('查看订阅github')
-    .action(async ({ session }) => {
-      const target = session.guildId || session.userId || session.channelId
-      if (!target) {
-        session.send('无法识别订阅目标。')
-        return;
+    .option('admin', '3')
+    .action(async ({ session, options }) => {
+      if (options.admin) {
+        const list = await ctx.database.get('github_subscription', {})
+        if (!list.length) {
+          session.send('暂无订阅记录。')
+          return;
+        }
+        const content = list.map((item: Subscription) => {
+          return `目标：${item.target} | 仓库：${item.repo} | 事件：${item.events} | 平台：${item.platform}`
+        }).join('\n')
+        session.send(`所有订阅记录：\n${content}`)
+      } else {
+        const target = session.guildId || session.userId || session.channelId
+        if (!target) {
+          session.send('无法识别订阅目标。')
+          return;
+        }
+        const platform = session.platform
+        const list = await ctx.database.get('github_subscription', { target, platform }) as Subscription[]
+        if (!list.length) {
+          session.send('当前无任何订阅。')
+          return;
+        }
+        const content = list.map(item => `- ${item.repo} (事件: ${item.events})`).join('\n')
+        session.send(`当前订阅的仓库：\n${content}`)
       }
-      const platform = session.platform
-      const list = await ctx.database.get('github_subscription', { target, platform }) as Subscription[]
-      if (!list.length) {
-        session.send('当前无任何订阅。')
-        return;
-      }
-      const content = list.map(item => `- ${item.repo} (事件: ${item.events})`).join('\n')
-      session.send(`当前订阅的仓库：\n${content}`)
     })
 
   // 获取当前支持的事件类型命令
@@ -259,42 +381,12 @@ export function apply(ctx: Context, config: Config) {
           case 'issues': emoji = '📝'; break
           case 'pull_request': emoji = '🔀'; break
           case 'release': emoji = '🏷️'; break
+          case 'issue_comment': emoji = '💬'; break
           default: break
         }
         return `${emoji} ${type}`
       }).join('\n')
       session.send(`当前支持的 Github 事件类型：\n${content}`)
-    })
-
-  // 管理员命令：查看所有订阅记录
-  ctx.command('wh-admin-list', '【管理员】查看所有 Github 订阅记录')
-    .alias('管理订阅列表')
-    .option('admin', '3')
-    .action(async ({ session }) => {
-      const list = await ctx.database.get('github_subscription', {})
-      if (!list.length) {
-        session.send('暂无订阅记录。')
-        return;
-      }
-      const content = list.map((item: Subscription) => {
-        return `目标：${item.target} | 仓库：${item.repo} | 事件：${item.events} | 平台：${item.platform}`
-      }).join('\n')
-      session.send(`所有订阅记录：\n${content}`)
-    })
-
-  // 管理员命令：删除指定订阅记录
-  ctx.command('wh-admin-remove <repo> <target>', '【管理员】删除指定 Github 订阅记录')
-    .alias('删除订阅')
-    .option('admin', '3')
-    .action(async ({ session }, repo: string, target: string) => {
-      const platform = session.platform
-      const subscription = await ctx.database.get('github_subscription', { repo, target, platform })
-      if (!subscription.length) {
-        session.send('未找到对应的订阅记录。')
-        return;
-      }
-      await ctx.database.remove('github_subscription', { repo, target, platform })
-      session.send(`已删除订阅记录：仓库 ${repo}，目标 ${target}`)
     })
 
   // Webhook 路由处理
@@ -336,8 +428,11 @@ export function apply(ctx: Context, config: Config) {
       return
     }
     // 构造消息链，并通知对应订阅者
-    const msgChain = buildMsgChain(event, payload)
-    sendEventMessage(ctx, subscriptions, msgChain)
+    const msgChain = buildMsgChain(event, payload, config)
+    // 如果消息链为空，则不推送
+    if (msgChain.length) {
+      sendEventMessage(ctx, subscriptions, msgChain)
+    }
     res.status = 200
     res.body = 'Webhook received'
   })
