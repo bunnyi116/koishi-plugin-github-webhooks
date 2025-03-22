@@ -12,10 +12,10 @@
     "dist"
   ],
   "license": "MIT",
-  "homepage": "https://github.com/bunnyi116/koishi-app/external/github-webhooks/readme.md",
+  "homepage": "https://github.com/bunnyi116/koishi-plugin-github-webhooks",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/bunnyi116/koishi-app.git"
+    "url": "git+https://github.com/bunnyi116/koishi-plugin-github-webhooks.git"
   },
   "keywords": [
     "koishi",
