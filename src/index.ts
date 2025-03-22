@@ -34,7 +34,7 @@ export interface Config {
 }
 
 export const Config: Schema<Config> = Schema.object({
-  path: Schema.string().default('/github/webhook').description('Github Webhook 路由路径'),
+  path: Schema.string().default('/github/webhooks').description('Github Webhook 路由路径'),
   repositories: Schema.array(
     Schema.object({
       repo: Schema.string().description('预设仓库全名，例如 owner/repo'),
