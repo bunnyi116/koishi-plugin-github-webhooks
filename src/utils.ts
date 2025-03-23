@@ -58,12 +58,12 @@ const helper = {
 // ===================== 事件处理器 =====================
 const eventHandlers: Record<string, (payload: any) => string> = {
     star: (payload) => {
-        const { action, repository, sender, stargazers_count } = payload
+        const { action, repository, sender } = payload
         return [
             helper.repoHeader(repository),
             helper.formatItem('⭐', 'Star 事件', action === 'created' ? '新增' : '取消'),
             helper.formatItem('👤', '操作用户', sender?.login || '未知'),
-            helper.formatItem('✨', '当前星数', stargazers_count ?? '0'),
+            helper.formatItem('✨', '当前星数', payload.repository.stargazers_count ?? '0'),
             helper.formatLink('查看仓库', repository.html_url)
         ].join('\n')
     },

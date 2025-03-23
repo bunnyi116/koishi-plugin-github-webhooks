@@ -1,7 +1,7 @@
 {
   "name": "koishi-plugin-github-webhooks",
   "description": "支持 Github Webhook 推送",
-  "version": "1.0.23",
+  "version": "1.0.25",
   "contributors": [
     "bunnyi116 <1160706050@qq.com>"
   ],
@@ -27,7 +27,7 @@
     "koishi": "^4.18.7"
   },
   "koishi": {
-    "preview": true,
+    "preview": false,
     "description": {
       "zh": "支持 Github Webhook 推送"
     },
