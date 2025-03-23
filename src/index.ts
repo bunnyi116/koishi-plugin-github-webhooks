@@ -16,7 +16,6 @@ export interface PluginConfig {
   enableWatch: boolean
   enableUnknownEvent: boolean
   repositories: RepositoryConfig[]
-
 }
 
 export const Config: Schema<PluginConfig> = Schema.object({

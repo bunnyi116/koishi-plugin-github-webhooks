@@ -30,8 +30,12 @@ const helper = {
     repoHeader: (repo: any): string =>
         `📦 仓库：${repo?.full_name || '未知仓库'}`,
 
-    formatItem: (emoji: string, label: string, value?: string): string => {
-        return value?.trim() ? `${emoji} ${label}：${value}` : ''
+    formatItem: (emoji: string, label: string, value?: any): string => {
+        // 安全处理所有值类型
+        const strValue = value !== undefined && value !== null 
+            ? value.toString().trim()
+            : ''
+        return strValue ? `${emoji} ${label}：${strValue}` : ''
     },
 
     formatLink: (text: string, url: string): string =>
@@ -62,10 +66,10 @@ const eventHandlers: Record<string, (payload: any) => string> = {
         return [
             helper.repoHeader(repository),
             helper.formatItem('⭐', 'Star 事件', action === 'created' ? '新增' : '取消'),
-            helper.formatItem('👤', '操作用户', sender?.login || '未知'),
-            helper.formatItem('✨', '当前星数', payload.repository.stargazers_count ?? '0'),
+            helper.formatItem('👤', '操作用户', sender?.login),
+            helper.formatItem('✨', '当前星数', repository?.stargazers_count?.toString() || '0'),
             helper.formatLink('查看仓库', repository.html_url)
-        ].join('\n')
+        ].filter(Boolean).join('\n')
     },
 
     push: (payload) => {
@@ -73,23 +77,24 @@ const eventHandlers: Record<string, (payload: any) => string> = {
         return [
             helper.repoHeader(payload.repository),
             helper.formatItem('🚀', '代码推送', `分支 ${branch}`),
-            helper.formatItem('👤', '提交者', payload.pusher?.name || '未知'),
-            helper.formatCommits(payload.commits),
+            helper.formatItem('👤', '提交者', payload.pusher?.name),
+            ...helper.formatCommits(payload.commits),
             helper.formatLink('查看变更', payload.compare)
-        ].join('\n')
+        ].filter(Boolean).join('\n')
     },
 
     workflow_run: (payload) => {
         if (payload.action !== 'completed') return ''
         const workflow = payload.workflow_run
         const status = workflow.conclusion === 'success' ? '✅ 成功' : '❌ 失败'
+        const duration = Math.round(workflow.duration / 60)
         return [
             helper.repoHeader(payload.repository),
             helper.formatItem('⚙️', '工作流状态', status),
             helper.formatItem('📛', '工作流名称', workflow.name),
-            helper.formatItem('⏱️', '运行时长', `${Math.round(workflow.duration / 60)}秒`),
+            helper.formatItem('⏱️', '运行时长', `${duration}秒`),
             helper.formatLink('查看详情', workflow.html_url)
-        ].join('\n')
+        ].filter(Boolean).join('\n')
     },
 
     issues: (payload) => {
@@ -97,48 +102,43 @@ const eventHandlers: Record<string, (payload: any) => string> = {
         const issue = payload.issue || {}
         const sender = payload.sender?.login || '未知用户'
 
-        // 基础信息行
         const baseLines = [
             helper.repoHeader(repository),
             `📌 事件类型：${{
                 opened: '📝 新建 Issue',
                 closed: '🔒 关闭 Issue',
                 reopened: '🔓 重新开启 Issue',
-                deleted: '🗑️ 删除 Issue', // 新增删除事件类型
+                deleted: '🗑️ 删除 Issue',
                 assigned: '👤 指派 Issue',
                 labeled: '🏷️ 标记 Issue'
             }[action] || '未知操作'}`
         ]
 
-        // 标题处理（兼容已删除的 Issue）
-        const title = issue.title
+        const title = issue.title 
             ? `🏷️ 标题：${issue.title}`
             : (action === 'deleted' ? '🗑️ 已删除 Issue' : '🏷️ 无标题')
         baseLines.push(title)
 
-        // 附加信息处理
         switch (action) {
             case 'opened':
                 issue.body && baseLines.push(`📄 内容：${helper.truncate(issue.body, 100)}`)
                 break
             case 'assigned':
-                baseLines.push(`👥 负责人：${payload.assignee?.login || '未知'}`)
+                baseLines.push(`👥 负责人：${payload.assignee?.login || '未知用户'}`)
                 break
             case 'labeled':
-                baseLines.push(`🔖 标签：${payload.label?.name || '未知'}`)
+                baseLines.push(`🔖 标签：${payload.label?.name || '未知标签'}`)
                 break
-            case 'deleted': // 处理删除事件
+            case 'deleted':
                 baseLines.push(`🚨 该 Issue 已被永久删除`)
                 break
         }
 
-        // 公共信息
         baseLines.push(
             `👤 操作者：${sender}`,
-            helper.formatLink('查看详情', issue.html_url || repository.html_url) // 兼容已删除的链接
+            helper.formatLink('查看详情', issue.html_url || repository.html_url)
         )
 
-        // 严格过滤空值
         return baseLines.filter(line => line?.trim()).join('\n')
     },
 
@@ -148,7 +148,7 @@ const eventHandlers: Record<string, (payload: any) => string> = {
             opened: ['🔄 新建 PR', `标题：${pr.title}`],
             closed: [`✅ ${pr.merged ? '合并' : '关闭'} PR`],
             reopened: ['🔄 重新开启 PR'],
-            review_requested: ['👥 请求审核', `审核者：${payload.requested_reviewer?.login || '未知'}`],
+            review_requested: ['👥 请求审核', `审核者：${payload.requested_reviewer?.login || '未知用户'}`],
             ready_for_review: ['📢 PR 准备就绪'],
             synchronize: ['🔄 代码更新'],
             edited: ['✏️ 内容修改']
@@ -156,13 +156,13 @@ const eventHandlers: Record<string, (payload: any) => string> = {
 
         const contentLines = [
             helper.repoHeader(payload.repository),
-            ...(actionMap[action] || []).map((text: string) =>
-                text.startsWith('✅') || text.startsWith('🔄')
-                    ? `📌 事件状态：${text}`
+            ...(actionMap[action] || []).map(text => 
+                text.startsWith('✅') || text.startsWith('🔄') 
+                    ? `📌 事件状态：${text}` 
                     : `📢 事件操作：${text}`
             ),
             `📝 PR 标题：${pr.title}`,
-            `👤 操作者：${payload.sender?.login || '未知'}`,
+            `👤 操作者：${payload.sender?.login || '未知用户'}`,
             helper.formatLink('查看详情', pr.html_url)
         ]
 
@@ -171,18 +171,17 @@ const eventHandlers: Record<string, (payload: any) => string> = {
 
     release: (payload) => {
         const { release } = payload
-        const actionMap = {
-            published: '🎉 发布新版本',
-            edited: '✏️ 更新版本',
-            deleted: '🗑️ 删除版本'
-        }
         return [
             helper.repoHeader(payload.repository),
-            helper.formatItem('🏷️', '版本事件', actionMap[payload.action]),
-            helper.formatItem('🏷️', '版本号', release.tag_name),
-            helper.formatItem('👤', '发布者', release.author?.login ?? '未知'),
+            helper.formatItem('🏷️', '版本事件', {
+                published: '🎉 发布新版本',
+                edited: '✏️ 更新版本',
+                deleted: '🗑️ 删除版本'
+            }[payload.action]),
+            helper.formatItem('🏷️', '版本号', release.tag_name?.toString() || '未知版本'),
+            helper.formatItem('👤', '发布者', release.author?.login),
             helper.formatLink('查看详情', release.html_url)
-        ].join('\n')
+        ].filter(Boolean).join('\n')
     },
 
     issue_comment: (payload) => {
@@ -191,28 +190,27 @@ const eventHandlers: Record<string, (payload: any) => string> = {
             helper.repoHeader(payload.repository),
             helper.formatItem('💬', '新评论', `Issue #${issue.number}`),
             helper.formatItem('📝', '评论内容', helper.truncate(comment.body, 100)),
-            helper.formatItem('👤', '评论者', comment.user?.login || '未知'),
+            helper.formatItem('👤', '评论者', comment.user?.login),
             helper.formatLink('查看详情', comment.html_url)
-        ].join('\n') // 关键修复：改用换行符连接
+        ].filter(Boolean).join('\n')
     },
 
     fork: (payload) => [
         helper.repoHeader(payload.repository),
         helper.formatItem('⑂', '仓库 Fork', '新分支仓库被创建'),
-        helper.formatItem('👤', '操作者', payload.sender?.login || '未知'),
+        helper.formatItem('👤', '操作者', payload.sender?.login),
         helper.formatItem('📦', '新仓库', payload.forkee.full_name),
         helper.formatLink('查看 Fork', payload.forkee.html_url)
-    ].join('\n'),
+    ].filter(Boolean).join('\n'),
 
     watch: (payload) => [
         helper.repoHeader(payload.repository),
         helper.formatItem('👀', 'Watch 事件',
             payload.action === 'started' ? '开始关注' : '取消关注'),
-        helper.formatItem('👤', '操作者', payload.sender?.login || '未知'),
+        helper.formatItem('👤', '操作者', payload.sender?.login),
         helper.formatLink('查看仓库', payload.repository.html_url)
-    ].join('\n')
+    ].filter(Boolean).join('\n')
 }
-
 
 // 主消息构建函数
 export function buildMsgChain(ctx: Context, event: string, payload: any, config: PluginConfig): Element[] {
@@ -220,17 +218,17 @@ export function buildMsgChain(ctx: Context, event: string, payload: any, config:
         const handler = eventHandlers[event]
         if (!handler) {
             return config.enableUnknownEvent
-                ? [h('message', [helper.repoHeader(payload.repository), `📢 未知事件类型：${event}`
-                ].filter(Boolean).join('\n'))]
+                ? [h('message', [
+                    helper.repoHeader(payload.repository), 
+                    `📢 未知事件类型：${event}`
+                  ].filter(Boolean).join('\n'))]
                 : []
         }
-        if (!config.enableWatch && event.toLowerCase() == 'watch') {
-            return;
-        }
+        
         const content = handler(payload)
         return content ? [h('message', content)] : []
     } catch (error) {
         ctx?.logger('github-webhooks').warn('消息生成失败:', error)
-        return;
+        return []
     }
 }
