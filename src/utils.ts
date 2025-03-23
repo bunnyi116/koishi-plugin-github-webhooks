@@ -32,7 +32,7 @@ const helper = {
 
     formatItem: (emoji: string, label: string, value?: any): string => {
         // 安全处理所有值类型
-        const strValue = value !== undefined && value !== null 
+        const strValue = value !== undefined && value !== null
             ? value.toString().trim()
             : ''
         return strValue ? `${emoji} ${label}：${strValue}` : ''
@@ -114,7 +114,7 @@ const eventHandlers: Record<string, (payload: any) => string> = {
             }[action] || '未知操作'}`
         ]
 
-        const title = issue.title 
+        const title = issue.title
             ? `🏷️ 标题：${issue.title}`
             : (action === 'deleted' ? '🗑️ 已删除 Issue' : '🏷️ 无标题')
         baseLines.push(title)
@@ -156,9 +156,9 @@ const eventHandlers: Record<string, (payload: any) => string> = {
 
         const contentLines = [
             helper.repoHeader(payload.repository),
-            ...(actionMap[action] || []).map(text => 
-                text.startsWith('✅') || text.startsWith('🔄') 
-                    ? `📌 事件状态：${text}` 
+            ...(actionMap[action] || []).map(text =>
+                text.startsWith('✅') || text.startsWith('🔄')
+                    ? `📌 事件状态：${text}`
                     : `📢 事件操作：${text}`
             ),
             `📝 PR 标题：${pr.title}`,
@@ -219,12 +219,14 @@ export function buildMsgChain(ctx: Context, event: string, payload: any, config:
         if (!handler) {
             return config.enableUnknownEvent
                 ? [h('message', [
-                    helper.repoHeader(payload.repository), 
+                    helper.repoHeader(payload.repository),
                     `📢 未知事件类型：${event}`
-                  ].filter(Boolean).join('\n'))]
+                ].filter(Boolean).join('\n'))]
                 : []
         }
-        
+        if (event == 'watch' && !config.enableWatch) {
+            return [];
+        }
         const content = handler(payload)
         return content ? [h('message', content)] : []
     } catch (error) {
