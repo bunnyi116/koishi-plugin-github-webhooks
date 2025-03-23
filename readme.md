@@ -15,7 +15,7 @@
  - 🏷️ release
 
 使用方法：在 `github` 中的项目设置中添加中 `wenhook` 设置
- - Payload URL：`http://localhost:5140/github/webhooks` （http://localhost:5140换成你的Koishi公网地址，能让github-webhook访问到的地址，/github/webhooks是本插件的 path ）
+ - Payload URL：`http://localhost:5140/github/webhooks` （`http://localhost:5140` 换成你的Koishi公网地址，能让github-webhook访问到的地址，`/github/webhooks`是本插件的 path ）
 
  - Content type：`application/json`
  
