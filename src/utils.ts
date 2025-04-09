@@ -87,7 +87,11 @@ const eventHandlers: Record<string, (payload: any) => string> = {
         if (payload.action !== 'completed') return ''
         const workflow = payload.workflow_run
         const status = workflow.conclusion === 'success' ? '✅ 成功' : '❌ 失败'
-        const duration = Math.round(workflow.duration / 60)
+        
+        const start = new Date(workflow.run_started_at || workflow.created_at)
+        const end = new Date(workflow.updated_at)
+        const duration = Math.round((end.getTime() - start.getTime()) / 1000) // 转为秒
+        
         return [
             helper.repoHeader(payload.repository),
             helper.formatItem('⚙️', '工作流状态', status),
