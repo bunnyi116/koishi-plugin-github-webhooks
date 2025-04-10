@@ -1,5 +1,4 @@
 import { PluginConfig } from '.'
-import crypto from 'crypto'
 import { Context, Element, h } from 'koishi'
 
 /** 从 URL 中提取 GitHub 仓库路径信息 */
@@ -10,7 +9,7 @@ export function getGithubRegURL(url: string): string {
 }
 
 /** 根据订阅项发送消息 */
-export function sendEventMessage(ctx: Context, subscriptions: any[], msgElement: Element[]) {
+export function sendEventMessage(ctx: Context, subscriptions: any[], msgElement: (Element | undefined)[]) {
     if (!msgElement.length) return
     ctx.bots.forEach(bot => {
         subscriptions.forEach(sub => {
@@ -25,7 +24,9 @@ export function sendEventMessage(ctx: Context, subscriptions: any[], msgElement:
     })
 }
 
-// ===================== 辅助工具 =====================
+/**
+ * 辅助工具函数
+ */
 const helper = {
     repoHeader: (repo: any): string =>
         `📦 仓库：${repo?.full_name || '未知仓库'}`,
@@ -59,8 +60,10 @@ const helper = {
     }
 }
 
-// ===================== 事件处理器 =====================
-const eventHandlers: Record<string, (payload: any) => string> = {
+/**
+ * 事件处理器
+ */
+const eventHandlers: Record<string, (payload: any) => string | null> = {
     star: (payload) => {
         const { action, repository, sender } = payload
         return [
@@ -87,11 +90,11 @@ const eventHandlers: Record<string, (payload: any) => string> = {
         if (payload.action !== 'completed') return ''
         const workflow = payload.workflow_run
         const status = workflow.conclusion === 'success' ? '✅ 成功' : '❌ 失败'
-        
+
         const start = new Date(workflow.run_started_at || workflow.created_at)
         const end = new Date(workflow.updated_at)
         const duration = Math.round((end.getTime() - start.getTime()) / 1000) // 转为秒
-        
+
         return [
             helper.repoHeader(payload.repository),
             helper.formatItem('⚙️', '工作流状态', status),
@@ -146,6 +149,17 @@ const eventHandlers: Record<string, (payload: any) => string> = {
         return baseLines.filter(line => line?.trim()).join('\n')
     },
 
+    issue_comment: (payload) => {
+        const { comment, issue } = payload
+        return [
+            helper.repoHeader(payload.repository),
+            helper.formatItem('💬', '新评论', `Issue #${issue.number}`),
+            helper.formatItem('📝', '评论内容', helper.truncate(comment.body, 100)),
+            helper.formatItem('👤', '评论者', comment.user?.login),
+            helper.formatLink('查看详情', comment.html_url)
+        ].filter(Boolean).join('\n')
+    },
+
     pull_request: (payload) => {
         const { action, pull_request: pr } = payload
         const actionMap = {
@@ -188,17 +202,6 @@ const eventHandlers: Record<string, (payload: any) => string> = {
         ].filter(Boolean).join('\n')
     },
 
-    issue_comment: (payload) => {
-        const { comment, issue } = payload
-        return [
-            helper.repoHeader(payload.repository),
-            helper.formatItem('💬', '新评论', `Issue #${issue.number}`),
-            helper.formatItem('📝', '评论内容', helper.truncate(comment.body, 100)),
-            helper.formatItem('👤', '评论者', comment.user?.login),
-            helper.formatLink('查看详情', comment.html_url)
-        ].filter(Boolean).join('\n')
-    },
-
     fork: (payload) => [
         helper.repoHeader(payload.repository),
         helper.formatItem('⑂', '仓库 Fork', '新分支仓库被创建'),
@@ -209,30 +212,28 @@ const eventHandlers: Record<string, (payload: any) => string> = {
 
     watch: (payload) => [
         helper.repoHeader(payload.repository),
-        helper.formatItem('👀', 'Watch 事件',
-            payload.action === 'started' ? '开始关注' : '取消关注'),
+        helper.formatItem('👀', 'Watch 事件', payload.action === 'started' ? '开始关注' : '取消关注'),
         helper.formatItem('👤', '操作者', payload.sender?.login),
         helper.formatLink('查看仓库', payload.repository.html_url)
-    ].filter(Boolean).join('\n')
+    ].filter(Boolean).join('\n'),
+
+    unknown: (payload) => {
+        const { action, repository, sender } = payload
+        return [
+            helper.repoHeader(repository),
+            helper.formatItem('❓', '未知事件', action),
+            helper.formatItem('👤', '操作者', sender?.login),
+            helper.formatLink('查看详情', repository.html_url)
+        ].filter(Boolean).join('\n')
+    },
 }
 
 // 主消息构建函数
-export function buildMsgChain(ctx: Context, event: string, payload: any, config: PluginConfig): Element[] {
+export function buildMsgChain(ctx: Context, event: string, payload: any, config: PluginConfig): (Element | null)[] {
     try {
-        const handler = eventHandlers[event]
-        if (!handler) {
-            return config.enableUnknownEvent
-                ? [h('message', [
-                    helper.repoHeader(payload.repository),
-                    `📢 未知事件类型：${event}`
-                ].filter(Boolean).join('\n'))]
-                : []
-        }
-        if (event == 'watch' && !config.enableWatch) {
-            return [];
-        }
+        const handler = eventHandlers[event] ?? eventHandlers['unknown']
         const content = handler(payload)
-        return content ? [h('message', content)] : []
+        return content ? [h('message', content)] : null
     } catch (error) {
         ctx?.logger('github-webhooks').warn('消息生成失败:', error)
         return []
