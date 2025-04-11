@@ -44,9 +44,9 @@ export function setupWebhookServer(ctx: Context, config: PluginConfig) {
             const allowedEvents = sub.events.split(',').map(e => e.trim())
             if (allowedEvents.includes(payload_event)) {
                 return true
-            } else if (config_repo.enableUnknownEvent) {
+            } else {
                 // 如果配置了未知事件推送，则允许未知事件
-                return true
+                return config_repo.enableUnknownEvent
             }
         })
         if (!subscriptions.length) {
@@ -57,7 +57,7 @@ export function setupWebhookServer(ctx: Context, config: PluginConfig) {
 
         if (config_repo) {
             // 如果配置了仓库, 先过滤掉配置中未启用的事件
-            if (!config_repo.watch && payload_event === 'watch') {
+            if (!config_repo.enableWatch && payload_event === 'watch') {
                 res.status = 200
                 res.body = 'Watch event not enabled for this repository'
                 return

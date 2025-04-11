@@ -12,7 +12,7 @@ export const inject = { required: ['database', 'server'] }
 export interface RepositoryConfig {
   repo: string
   secret: string
-  watch: boolean
+  enableWatch: boolean
   enableUnknownEvent: boolean
 }
 
@@ -51,7 +51,7 @@ export const Config: Schema<PluginConfig> = Schema.object({
         .role('secret')
         .description(`该仓库对应的 Webhook secret`),
 
-      watch: Schema.boolean()
+      enableWatch: Schema.boolean()
         .default(false)
         .description('是否启用 Watch 事件推送'),
 
