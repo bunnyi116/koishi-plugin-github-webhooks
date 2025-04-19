@@ -1,4 +1,4 @@
-import { PluginConfig } from '.'
+import { PluginConfig, RepositoryConfig } from '.'
 import { Context, Element, h } from 'koishi'
 
 /** 从 URL 中提取 GitHub 仓库路径信息 */
@@ -229,9 +229,15 @@ const eventHandlers: Record<string, (payload: any) => string | null> = {
 }
 
 // 主消息构建函数
-export function buildMsgChain(ctx: Context, event: string, payload: any, config: PluginConfig): (Element | null)[] {
+export function buildMsgChain(ctx: Context, payload_event: string, payload: any, config: RepositoryConfig): (Element | null)[] {
     try {
-        const handler = eventHandlers[event] ?? eventHandlers['unknown']
+        let handler = eventHandlers[payload_event]
+        if (handler == null || undefined) {
+            // 如果没有找到对应的事件处理器，则检查是否允许处理未知事件
+            if (config.enableUnknownEvent) {
+                handler = eventHandlers['unknown'];
+            }
+        }
         const content = handler(payload)
         return content ? [h('message', content)] : null
     } catch (error) {

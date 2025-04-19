@@ -49,6 +49,7 @@ export function setupWebhookServer(ctx: Context, config: PluginConfig) {
                 return config_repo.enableUnknownEvent
             }
         })
+        
         if (!subscriptions.length) {
             res.status = 200
             res.body = 'No subscription for this repository or event not subscribed'
@@ -65,7 +66,7 @@ export function setupWebhookServer(ctx: Context, config: PluginConfig) {
         }
 
         // 构造消息链，并通知对应订阅者
-        const msgChain = buildMsgChain(ctx, payload_event, payload, config)
+        const msgChain = buildMsgChain(ctx, payload_event, payload, config_repo)
 
         // 如果消息链为空，则不推送
         if (msgChain.length) {
