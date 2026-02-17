@@ -1,0 +1,36 @@
+commands:
+  github-webhooks:
+    subscribe:
+      description: 订阅指定 Github 仓库事件推送
+      messages:
+        noRepoConfigured: 当前未设置可供订阅的仓库。
+        selectRepo: 请选择订阅的仓库：\n{list}
+        invalidRepoIndex: 仓库序号无效，请输入有效的序号。
+        repoNotFound: 仓库 {0} 未在预设列表中，请选择正确的仓库。
+        targetNotFound: 无法识别订阅目标，请在群聊、私聊或频道中使用此命令。
+        subscriptionUpdated: 已更新订阅：{0}，订阅事件：{1}
+        subscriptionCreated: 订阅成功：{0}，订阅事件：{1}
+    unsubscribe:
+      description: 取消指定 Github 仓库事件推送订阅
+      messages:
+        adminOnly: 只有管理员才允许删除其他订阅记录。
+        unsupportedTarget: 无法识别订阅目标。
+        noSubscriptions: 当前没有订阅记录。
+        invalidSubscriptionIndex: 订阅序号无效，请输入有效的序号。
+        unsubscribeSuccess: 取消订阅成功：{0}，目标：{1}
+    list:
+      description: 查看订阅列表
+      messages:
+        allSubscriptions: 所有订阅记录：\n{content}
+        currentSubscribedRepos: 当前订阅的仓库：\n{content}
+    types:
+      description: 获取当前支持推送的 Github 事件类型
+      messages:
+        supportedEvents: 当前支持的 Github 事件类型：\n{content}
+
+webhook:
+  unknownRepoInfo: 'Bad Request: repository info missing'
+  repoNotConfigured: 仓库 {0} 未在预设列表中，忽略处理。
+  forbidden: Forbidden
+  noSubscriptionForEvent: No subscription for this repository or event not subscribed
+  webhookReceived: Webhook received

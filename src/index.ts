@@ -1,62 +1,69 @@
 import { Context, Schema } from 'koishi'
 import { applyDatabase } from './database'
 import { applyCommands } from './commands'
-import { setupEventListeners } from './event-listener'
-import { Logger } from './logger'
+import { setupWebhookServer } from './webhooks'
 
 export const name = 'github-webhooks'
-export const reusable = false
-export const filter = false
+export const inject = { required: ['database', 'server'] }
 
-export const inject = {
-  required: ['database']
+/**
+ * 仓库配置
+ */
+export interface RepositoryConfig {
+  repo: string
+  secret: string
+  enableWatch: boolean
+  enableUnknownEvent: boolean
 }
 
-export const usage = `
----
-
-### 前置依赖：
-
-本插件依赖 adapter-github 适配器接收事件
-
--> 请先安装并配置 adapter-github（推荐使用webhook）
-
-然后开启本插件，在对应群组使用指令交互，即可进行订阅管理
-
----
-
-### 关于指令：
-
-使用 <code>指令名称 -h</code> 即可查看指令帮助，例如 <code>github.list -h</code>
-
----`
-
+/**
+ * 插件配置
+ */
 export interface PluginConfig {
-  botId: string
-  debug: boolean
+  path: string
+  allowUnknownRepositoryPush: boolean
+  repositories: RepositoryConfig[]
 }
 
+/**
+ * 插件配置
+ */
 export const Config: Schema<PluginConfig> = Schema.object({
-  botId: Schema.string()
-    .required()
-    .description('指定要监听的 GitHub Bot ID（机器人账号名）<br>-> 必填项，用于指定处理哪个 adapter-github 实例的事件<br>-> 避免多实例重复推送'),
-  debug: Schema.boolean()
+  path: Schema.string()
+    .default(`/github/webhooks`)
+    .description(`填写示例: github -> 仓库 -> webhook<br>
+      koishi公网地址(github能主动访问到的地址) -> <http://localhost:5140><br>
+      github-repo-webhook地址完整示例 -> <http://localhost:5140/github/webhooks>`),
+
+  allowUnknownRepositoryPush: Schema.boolean()
     .default(false)
-    .description('开启调试日志<br>-> 开启后会输出详细的事件处理日志')
-}).description('配置说明')
+    .description(`是否允许未配置的仓库推送事件, 开启后如果有未知仓库推送事件, 插件将会处理该事件, 否者插件将会忽略该事件推送`),
+
+  // 启用事件类型
+  repositories: Schema.array(
+    Schema.object({
+      repo: Schema.string()
+        .required()
+        .description(`预设仓库全名，例如 owner/repo`),
+
+      secret: Schema.string()
+        .required()
+        .role('secret')
+        .description(`该仓库对应的 Webhook secret`),
+
+      enableWatch: Schema.boolean()
+        .default(false)
+        .description('是否启用 Watch 事件推送'),
+
+      enableUnknownEvent: Schema.boolean()
+        .default(false)
+        .description('是否推送未知事件消息'),
+    })
+  ).description(`监听的仓库列表，每个仓库必须配置 secret 用于安全校验, 避免伪造推送`).default([]),
+})
 
 export function apply(ctx: Context, config: PluginConfig) {
-  // 初始化日志器
-  const logger = new Logger(ctx, config)
-
-  // 初始化数据库
   applyDatabase(ctx);
-
-  // 注册指令
-  applyCommands(ctx)
-
-  // 监听 adapter-github 的事件
-  setupEventListeners(ctx, config, logger)
-
-  logger.debug(`已启动事件监听器，监听 Bot ID: ${config.botId}`)
+  applyCommands(ctx, config)
+  setupWebhookServer(ctx, config)
 }
