@@ -2,12 +2,11 @@ import { Context } from 'koishi'
 import { subscribeCommand } from './subscribe'
 import { unsubscribeCommand } from './unsubscribe'
 import { listCommand } from './list'
-import { typesCommand } from './types'
-import { PluginConfig } from '..'
+import { resetSubscribeCommand } from './reset-subscribe'
 
-export function applyCommands(ctx: Context, config: PluginConfig) {
-    subscribeCommand(ctx, config)
-    unsubscribeCommand(ctx, config)
-    listCommand(ctx, config)
-    typesCommand(ctx)
+export function applyCommands(ctx: Context) {
+  subscribeCommand(ctx)
+  unsubscribeCommand(ctx)
+  listCommand(ctx)
+  resetSubscribeCommand(ctx)
 }

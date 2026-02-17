@@ -1,56 +1,33 @@
 import { Context } from 'koishi'
-import { PluginConfig } from '..';
 import { TABLES_SUBSCRIBERS } from '../database';
 
-export function unsubscribeCommand(ctx: Context, config: PluginConfig) {
-    ctx.command('wh-unsub [repo:string] [target]', '取消指定 Github 仓库事件推送订阅')
-        .alias('仓库取消订阅')
-        .option('admin', '3')
-        .action(async ({ session, options }, repo?: string, targetArg?: string) => {
-            // 确定目标
-            let target: string;
-            if (targetArg) {
-                if (!options.admin) {
-                    session.send('只有管理员才允许删除其他订阅记录。');
-                    return;
-                }
-                target = targetArg;
-            } else {
-                target = session.guildId || session.channelId || session.userId;
-            }
-            if (!target) {
-                session.send('无法识别订阅目标。');
-                return;
-            }
-            const platform = session.platform;
+export function unsubscribeCommand(ctx: Context) {
+  ctx.command('github.unsub <owner:string> <repo:string>', '取消订阅指定 GitHub 仓库')
+    .alias('github.仓库取消订阅')
+    .usage('例如：github.unsub owner repo')
+    .example('github.unsub koishijs koishi')
+    .action(async ({ session }, owner?: string, repo?: string) => {
+      if (!owner || !repo) {
+        await session.send('请提供仓库所有者和仓库名称\n使用方法：github.unsub owner repo\n例如：github.unsub koishijs koishi');
+        return;
+      }
 
-            // 未传入 repo 参数
-            if (!repo) {
-                const userSubs = await ctx.database.get(TABLES_SUBSCRIBERS, { platform, target });
-                if (userSubs.length == 1) {
-                    await ctx.database.remove(TABLES_SUBSCRIBERS, { platform, target });
-                    session.send(`仓库取消订阅成功：${repo}`);
-                    return;
-                } else if (userSubs.length) {
-                    const listText = userSubs
-                        .map((item, index) => `${index}: ${item.repo} (事件: ${item.events})`)
-                        .join('\n');
-                    session.send(`未找到订阅 ${repo}。\n您当前已订阅的仓库列表：\n${listText}`);
-                    return;
-                }
-                session.send(`未找到订阅 ${repo}，且当前没有任何订阅记录。`);
-                return;
-            }
+      const target = session.guildId || session.channelId || session.userId;
+      if (!target) {
+        await session.send('无法识别订阅目标。');
+        return;
+      }
 
-            // 已传入 repo 参数
-            const subscriptions = await ctx.database.get(TABLES_SUBSCRIBERS, { platform, target, repo });
-            if (subscriptions.length >= 1) {
-                await ctx.database.remove(TABLES_SUBSCRIBERS, { platform, target, repo });
-                session.send(`仓库取消订阅成功：${repo}`);
-                return;
-            } else {
-                session.send(`没有找到仓库订阅记录: ${repo}`);
-                return;
-            }
-        });
+      const platform = session.platform;
+      const repoFullName = `${owner}/${repo}`;
+
+      // 检查订阅是否存在
+      const subscriptions = await ctx.database.get(TABLES_SUBSCRIBERS, { platform, target, repo: repoFullName });
+      if (subscriptions.length >= 1) {
+        await ctx.database.remove(TABLES_SUBSCRIBERS, { platform, target, repo: repoFullName });
+        await session.send(`✅ 取消订阅成功：${repoFullName}`);
+      } else {
+        await session.send(`❌ 没有找到仓库订阅记录：${repoFullName}`);
+      }
+    });
 }

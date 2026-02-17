@@ -1,6 +1,6 @@
 import { Context } from 'koishi'
 
-export const TABLES_SUBSCRIBERS = 'github_subscribers';
+export const TABLES_SUBSCRIBERS = 'github_webhooks_subscriptions_v2';
 
 export interface Subscribers {
   platform: string
@@ -8,11 +8,13 @@ export interface Subscribers {
   target: string
   repo: string
   events: string
+  selfId: string
+  channelId: string
 }
 
 declare module 'koishi' {
   interface Tables {
-    github_subscribers: Subscribers
+    github_webhooks_subscriptions_v2: Subscribers
   }
 }
 
@@ -23,6 +25,8 @@ export function applyDatabase(ctx: Context) {
     target: { type: 'string', length: 150 },
     repo: { type: 'string', length: 150 },
     events: 'string',
+    selfId: { type: 'string', length: 150 },
+    channelId: { type: 'string', length: 150 },
   }, {
     primary: ['platform', 'type', 'target', 'repo'],
   })
